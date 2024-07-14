@@ -1,0 +1,5 @@
+cache/
+foundry-out/
+.vscode/
+.forge-snapshots/
+lib/
