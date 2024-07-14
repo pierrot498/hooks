@@ -24,9 +24,11 @@ import {Strings} from "@openzeppelin/contracts/utils/Strings.sol";
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {BeforeSwapDelta, BeforeSwapDeltaLibrary} from "@uniswap/v4-core/src/types/BeforeSwapDelta.sol";
 
+import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
+
 import "./libraries/LiquidityAmounts.sol";
 
-contract FullRange is BaseHook {
+contract FeeReducerHook is BaseHook {
     using CurrencyLibrary for Currency;
     using CurrencySettler for Currency;
     using PoolIdLibrary for PoolKey;
@@ -85,7 +87,12 @@ contract FullRange is BaseHook {
 
     mapping(PoolId => PoolInfo) public poolInfo;
 
-    constructor(IPoolManager _manager) BaseHook(_manager) {}
+
+    IERC721 public feeToken;
+
+    constructor(IPoolManager _manager, address _feeToken) BaseHook(_manager) {
+        feeToken = IERC721(_feeToken);
+    }
 
     modifier ensure(uint256 deadline) {
         if (deadline < block.timestamp) revert ExpiredPastDeadline();
@@ -227,7 +234,7 @@ contract FullRange is BaseHook {
 
         poolInfo[poolId] = PoolInfo({hasAccruedFees: false, liquidityToken: poolToken});
 
-        return FullRange.beforeInitialize.selector;
+        return FeeReducerHook.beforeInitialize.selector;
     }
 
     function beforeAddLiquidity(
@@ -238,10 +245,10 @@ contract FullRange is BaseHook {
     ) external view override returns (bytes4) {
         if (sender != address(this)) revert SenderMustBeHook();
 
-        return FullRange.beforeAddLiquidity.selector;
+        return FeeReducerHook.beforeAddLiquidity.selector;
     }
 
-    function beforeSwap(address, PoolKey calldata key, IPoolManager.SwapParams calldata, bytes calldata)
+    function beforeSwap(address sender, PoolKey calldata key, IPoolManager.SwapParams calldata, bytes calldata)
         external
         override
         returns (bytes4, BeforeSwapDelta, uint24)
@@ -252,8 +259,12 @@ contract FullRange is BaseHook {
             PoolInfo storage pool = poolInfo[poolId];
             pool.hasAccruedFees = true;
         }
+        uint24 fee = key.fee;
+        if (feeToken.balanceOf(sender) > 1) {
+            fee = fee / 2;
+        }
 
-        return (IHooks.beforeSwap.selector, BeforeSwapDeltaLibrary.ZERO_DELTA, 0);
+        return (IHooks.beforeSwap.selector, BeforeSwapDeltaLibrary.ZERO_DELTA, fee);
     }
 
     function modifyLiquidity(PoolKey memory key, IPoolManager.ModifyLiquidityParams memory params)
